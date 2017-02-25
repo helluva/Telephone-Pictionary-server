@@ -67,10 +67,14 @@ function handleData(client, data) {
         var args = msgf[1].split(',')
         requestedHosting(client, args[0], args[1])
     } else if (msgf[0] == 'requestListOfGames') {
-        client.socket.write(msgID + '/' + requestedListOfGames() + '\r\n')
+        console.log(getListOfGamesStr())
+        client.socket.write(msgID + '/' + getListOfGamesStr() + '\r\n')
     } else if (msgf[0] == 'joinGame') {
         var args = msgf[1].split(',')
-        client.socket.write(msgID + '/' + requestJoin(client, msgf[0], msgf[1]) + '\r\n')
+        client.socket.write(msgID + '/' + requestJoin(client, args[0], args[1]) + '\r\n')
+    } else if (msgf[0] == 'requestRebroadcast') {
+        if (msgf[1] == 'playersInLobby')
+            client.socket.write(broadcastLobbyStr(client.game) + '\r\n')
     }
 }
 
@@ -110,7 +114,7 @@ function clientEnd(client) {
 
 
 
-
+const lobbyBroadcastLoopTime = 3000
 
 
 var nextGameID = 0
@@ -125,29 +129,33 @@ function Player(client, name) {
 
 function Game(gameName) {
     this.name = gameName
-    this.id = nextGameID++
     this.lobby = true
     this.players = []
     this.deleted = false
 }
 
-function broadcastLobbies(game) {
+function broadcastLobbyStr(game) {
+    var str = 'playersInLobby/'
+    for (var i = 0; i < game.players.length; ++i) {
+        if (i != 0) {
+            str += ','
+        }
+        str += game.players[i].name
+    }
+    return str
+}
+
+function broadcastLobbyLoop(game) {
     var lastPlayersLength = 0
     if (game.players.length != lastPlayersLength) {
-        var str = 'playersInLobby/'
-        for (var i = 0; i < game.players.length; ++i) {
-            if (i != 0) {
-                str += ','
-            }
-            str += game.players[i].name
-        }
+        var str = broadcastLobbyStr(game)
         for (var i = 0; i < game.players.length; ++i) {
             game.players[i].client.socket.write(str + '\r\n')
         }
         lastPlayersLength = game.players.length
     }
     if (!game.deleted) {
-        setTimeout(function() { broadcastLobbies(game) }, 3000)
+        setTimeout(function() { broadcastLobbyLoop(game) }, lobbyBroadcastLoopTime)
     }
 }
 
@@ -163,21 +171,21 @@ function requestedHosting(client, hostUsername, gameName) {
     game.players.push(player)
     games[nextGameID++] = game
 
-    setTimeout(function() { broadcastLobbies(game) }, 3000)
+    setTimeout(function() { broadcastLobbyLoop(game) }, lobbyBroadcastLoopTime)
 }
 
-function requestedListOfGames() {
+function getListOfGamesStr() {
 
     var gameListStr = ''
 
     var first = true
-    for (var i = 0; i < games.length; ++i) {
-        if (games[i].lobby) {
+    for (var game in games) {
+        if (games[game].lobby) {
             if (!first) {
                 gameListStr += ';'
-                first = false
             }
-            gameListStr += games[i].id + ',' + games[i].name
+            gameListStr += game + ',' + games[game].name
+            first = false
         }
     }
 
@@ -186,13 +194,19 @@ function requestedListOfGames() {
 }
 
 function requestJoin(client, playerName, gameID) {
+
+    console.log(gameID)
+
+    console.log(games)
+
     var player = new Player(client, playerName)
     client.game = games[gameID]
     client.player = player
-    games[gameID].push(player)
+    games[gameID].players.push(player)
 }
 
-function playerLeave(client, game) {
+function playerLeave(client) {
+
     client.game = null
     client.player = null
 }
