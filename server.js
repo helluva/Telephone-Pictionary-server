@@ -4,26 +4,20 @@ var net = require('net')
 const PORT = 1337
 
 
-var clientRegistry = {}
-
-
 var server = net.createServer(function(socket) {
 
     socket.setEncoding('utf8')
 
-    var client = {
-        socket : socket,
-        game : null,
-        player : null
-    }
+    var client = new Client(socket)
 
-    socket.write('ACK1\r\n')
-    client.socket.write('ACK2\r\n')
+    client.send('ACK - CONNECTED')
 
-    console.log("New connection: " + (new Date()).toISOString() + ' - ' + JSON.stringify(socket.address()))
+    console.log('New connection:', (new Date()).toISOString() + ' - ' + JSON.stringify(socket.address()))
 
     socket.on('data', function(data) {
-        handleData(client, data)
+        var dataString = data.toString().trim()
+        console.log('Received data:', dataString)
+        handleData(client, dataString)
     })
 
     socket.on('error', function() {
@@ -32,7 +26,7 @@ var server = net.createServer(function(socket) {
     })
 
     socket.on('end', function() {
-        console.log('DISCONNECTED: ' + JSON.stringify(socket.address()))
+        console.log('A client disconnected')
         clientEnd(client)
     })
 
@@ -48,34 +42,46 @@ server.listen(PORT)
 
 
 
+function Client(socket) {
+
+    this.socket = socket
+    this.game = null
+    this.player = null
+
+    this.send = function(str) {
+        socket.write(str + '\r\n')
+        console.log('Sent data:', str)
+    }
+
+}
+
+
 
 
 
 
 function handleData(client, data) {
 
-    var dataString = data.toString().trim()
-
-    console.log('received: ' + dataString)
-
     var msgID, msg
-    [msgID, msg] = dataString.split('/')
-
+    [msgID, msg] = data.split('/')
 
     var msgf = msg.split(':')
     if (msgf[0] == 'hostGame') {
         var args = msgf[1].split(',')
         requestedHosting(client, args[0], args[1])
     } else if (msgf[0] == 'requestListOfGames') {
-        console.log(getListOfGamesStr())
-        client.socket.write(msgID + '/' + getListOfGamesStr() + '\r\n')
+        client.send(msgID + '/' + getListOfGamesStr())
     } else if (msgf[0] == 'joinGame') {
         var args = msgf[1].split(',')
-        client.socket.write(msgID + '/' + requestJoin(client, args[0], args[1]) + '\r\n')
+        client.send(msgID + '/' + requestJoin(client, args[0], args[1]))
     } else if (msgf[0] == 'requestRebroadcast') {
-        if (msgf[1] == 'playersInLobby')
-            client.socket.write(broadcastLobbyStr(client.game) + '\r\n')
+        if (msgf[1] == 'playersInLobby') {
+            client.send(getBroadcastLobbyStr(client.game))
+        }
+    } else if (msgf[0] == 'startGame') {
+        hostStartedGame(client)
     }
+
 }
 
 
@@ -94,7 +100,7 @@ function handleData(client, data) {
 
 function clientEnd(client) {
     if (client.game != null) {
-        playerLeave(client.player, client.game)
+        playerLeave(client)
     }
 }
 
@@ -114,9 +120,6 @@ function clientEnd(client) {
 
 
 
-const lobbyBroadcastLoopTime = 3000
-
-
 var nextGameID = 0
 
 
@@ -124,6 +127,7 @@ var games = {}
 
 function Player(client, name) {
     this.client = client
+    this.host = false
     this.name = name
 }
 
@@ -132,9 +136,16 @@ function Game(gameName) {
     this.lobby = true
     this.players = []
     this.deleted = false
+
+    this.send = function(str) {
+        console.log('BROADCASTING:')
+        for (var i = 0; i < this.players.length; ++i) {
+            this.players[i].client.send(str)
+        }
+    }
 }
 
-function broadcastLobbyStr(game) {
+function getBroadcastLobbyStr(game) {
     var str = 'playersInLobby/'
     for (var i = 0; i < game.players.length; ++i) {
         if (i != 0) {
@@ -145,25 +156,18 @@ function broadcastLobbyStr(game) {
     return str
 }
 
-function broadcastLobbyLoop(game) {
+function broadcastLobbyToLobby(game) {
     var lastPlayersLength = 0
     if (game.players.length != lastPlayersLength) {
-        var str = broadcastLobbyStr(game)
-        for (var i = 0; i < game.players.length; ++i) {
-            game.players[i].client.socket.write(str + '\r\n')
-        }
+        game.send(getBroadcastLobbyStr(game))
         lastPlayersLength = game.players.length
-    }
-    if (!game.deleted) {
-        setTimeout(function() { broadcastLobbyLoop(game) }, lobbyBroadcastLoopTime)
     }
 }
 
 function requestedHosting(client, hostUsername, gameName) {
     var game = new Game(gameName)
     var player = new Player(client, hostUsername)
-
-    console.log('created game: ' + JSON.stringify(game))
+    player.host = true
 
     client.game = game
     client.player = player
@@ -171,7 +175,9 @@ function requestedHosting(client, hostUsername, gameName) {
     game.players.push(player)
     games[nextGameID++] = game
 
-    setTimeout(function() { broadcastLobbyLoop(game) }, lobbyBroadcastLoopTime)
+    console.log('Client (' + hostUsername + ') created game', game)
+
+    broadcastLobbyToLobby(game)
 }
 
 function getListOfGamesStr() {
@@ -179,34 +185,48 @@ function getListOfGamesStr() {
     var gameListStr = ''
 
     var first = true
-    for (var game in games) {
-        if (games[game].lobby) {
+    for (var gameID in games) {
+        if (games[gameID].lobby) {
             if (!first) {
                 gameListStr += ';'
             }
-            gameListStr += game + ',' + games[game].name
+            gameListStr += gameID + ',' + games[gameID].name
             first = false
         }
     }
 
     return gameListStr
-
 }
 
 function requestJoin(client, playerName, gameID) {
 
-    console.log(gameID)
-
-    console.log(games)
+    if (!games[gameID].lobby) {
+        return 'NO'
+    }
 
     var player = new Player(client, playerName)
     client.game = games[gameID]
     client.player = player
     games[gameID].players.push(player)
+
+    broadcastLobbyToLobby(games[gameID])
+
+    return 'JOINED'
+}
+
+function hostStartedGame(client) {
+    if (client.player.host && client.game.players.length > 1) {
+        client.game.send('gameStarted/')
+    }
 }
 
 function playerLeave(client) {
 
+    client.game.players.splice(client.game.players.indexOf(client), 1)
+
+    broadcastLobbyToLobby(client.game)
+
     client.game = null
     client.player = null
+
 }
