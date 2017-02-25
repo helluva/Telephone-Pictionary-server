@@ -100,7 +100,7 @@ function handleData(client, data) {
 
 function clientEnd(client) {
     if (client.game != null) {
-        playerLeave(client)
+        playerLeft(client.game, client)
     }
 }
 
@@ -116,8 +116,9 @@ function clientEnd(client) {
 
 
 
-
-
+// game states
+const LOBBY = 0
+const VIEWING = 2
 
 
 var nextGameID = 0
@@ -133,8 +134,8 @@ function Player(client, name) {
 
 function Game(gameName) {
     this.name = gameName
-    this.lobby = true
     this.players = []
+    this.state = G_LOBBY
     this.deleted = false
 
     this.send = function(str) {
@@ -186,7 +187,7 @@ function getListOfGamesStr() {
 
     var first = true
     for (var gameID in games) {
-        if (games[gameID].lobby) {
+        if (games[gameID].state == G_LOBBY) {
             if (!first) {
                 gameListStr += ';'
             }
@@ -200,7 +201,7 @@ function getListOfGamesStr() {
 
 function requestJoin(client, playerName, gameID) {
 
-    if (!games[gameID].lobby) {
+    if (!games[gameID].state == G_LOBBY) {
         return 'NO'
     }
 
@@ -220,11 +221,11 @@ function hostStartedGame(client) {
     }
 }
 
-function playerLeave(client) {
+function playerLeft(game, client) {
 
-    client.game.players.splice(client.game.players.indexOf(client), 1)
+    game.players.splice(game.players.indexOf(client), 1)
 
-    broadcastLobbyToLobby(client.game)
+    broadcastLobbyToLobby(game)
 
     client.game = null
     client.player = null
