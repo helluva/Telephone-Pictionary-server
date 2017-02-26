@@ -55,7 +55,7 @@ function Game(channel) {
     }
 
     this.clientProvidedCaption = function(client, caption) {
-        this.rounds[this.rounds.length - 1][this.order.indexOf(client)] = [client.username, caption]
+        this.rounds[this.rounds.length - 1][(this.order.indexOf(client) + this.rounds.length - 1) % this.order.length] = [client.username, caption]
         ++this.clientCounter
         if (this.clientCounter == this.rounds[this.rounds.length - 1].length) {
             return true
@@ -64,7 +64,7 @@ function Game(channel) {
     }
 
     this.clientProvidedImage = function(client, image) {
-        this.rounds[this.rounds.length - 1][this.order.indexOf(client)] = [client.username, image]
+        this.rounds[this.rounds.length - 1][(this.order.indexOf(client) + this.rounds.length - 1) % this.order.length] = [client.username, image]
         ++this.clientCounter
         if (this.clientCounter == this.rounds[this.rounds.length - 1].length) {
             return true
