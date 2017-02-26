@@ -1,7 +1,6 @@
 
 let net = require('net')
 
-const globals = require('./globals.js')
 const protocol = require('./protocol.js')
 
 
@@ -15,10 +14,20 @@ let server = net.createServer(function(socket) {
 
     client.send('ACK - CONNECTED')
 
+    let ghetto_buffer = ''
     socket.on('data', function(data) {
-        let dataString = data.toString().trim()
-        console.log('Received data:', dataString)
-        protocol.parseAndHandle(client, dataString)
+        let dataString = data.toString()
+        if (dataString.indexOf("\n") >= 0) {
+            let dataStrings = dataString.split("\n")
+            for (let i = 0; i < dataStrings.length - 1; ++i) {
+                let finalized = ghetto_buffer + dataStrings[i].trim()
+                console.log('Received data:', finalized)
+                protocol.parseAndHandle(client, finalized)
+            }
+            ghetto_buffer = ''
+        } else {
+            ghetto_buffer += dataString.trim()
+        }
     })
 
     socket.on('error', function() {
@@ -37,12 +46,8 @@ server.on('error', function() {
     console.log('SERVER ERROR')
 })
 
-server.listen(globals.PORT)
 
-console.log('SERVER LISTENING ON PORT', globals.PORT)
-
-
-
+module.exports = server
 
 
 

@@ -135,7 +135,7 @@ function Player(client, name) {
 function Game(gameName) {
     this.name = gameName
     this.players = []
-    this.state = LOBBY
+    this.state = G_LOBBY
     this.deleted = false
 
     this.send = function(str) {
@@ -187,7 +187,7 @@ function getListOfGamesStr() {
 
     var first = true
     for (var gameID in games) {
-        if (games[gameID].state == LOBBY) {
+        if (games[gameID].state == G_LOBBY) {
             if (!first) {
                 gameListStr += ';'
             }
@@ -201,7 +201,7 @@ function getListOfGamesStr() {
 
 function requestJoin(client, playerName, gameID) {
 
-    if (!games[gameID].state == LOBBY) {
+    if (!games[gameID].state == G_LOBBY) {
         return 'NO'
     }
 

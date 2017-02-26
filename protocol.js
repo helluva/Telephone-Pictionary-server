@@ -1,5 +1,6 @@
 
 const globals = require('./globals.js')
+
 const gamelogic = require('./gamelogic.js')
 
 
@@ -14,7 +15,7 @@ let channels = {}
 
 
 
-function parse(client, message) {
+function parseAndHandle(client, message) {
 
     let msgID, body
     [msgID, body] = message.split('/')
@@ -35,6 +36,11 @@ function parse(client, message) {
     } else if (func == 'provideCaption') {
         handleProvideCaption(new ResponseRequest(client, msgID), arg)
     } else if (func == 'provideImage') {
+        //setTimeout(function() { client.send('nextImage/' + arg) }, 1000)
+        handleProvideImage(new ResponseRequest(client, msgID), arg)
+    } else if (func == 'provideImageChunk') {
+        handleProvideImageChunk(new ResponseRequest(client, msgID), arg)
+    } else if (func == 'provideImageEnd') {
         handleProvideImage(new ResponseRequest(client, msgID), arg)
     }
 
@@ -99,9 +105,10 @@ function handleRequestBroadcast(rr, broadcast) {
 }
 
 function handleStartGame(rr) {
-    if (rr.client.host && rr.client.channel.clients.length >= 2) {
-        rr.respond('ACCEPTED')
+    if (rr.client.host) {
         rr.client.channel.playing = true
+        rr.respond('ACCEPTED')
+        rr.client.channel.game = new gamelogic.Game(rr.client.channel)
         startGameBroadcast.sendTo(rr.client.channel)
     } else {
         rr.respond('DENIED')
@@ -109,14 +116,20 @@ function handleStartGame(rr) {
 }
 
 function handleProvideCaption(rr, caption) {
-    gamelogic.clientProvidedCaption(rr.client, caption)
     rr.respond('THANKS!')
+    if (rr.client.channel.game.clientProvidedCaption(rr.client, caption)) {
+        setTimeout(function() { forwardNextRoundBatch(rr.client.channel) }, 3000)
+    }
 }
 
 function handleProvideImage(rr, imageBase64) {
-    gamelogic.clientProvidedImage(rr.client, imageBase64)
     rr.respond('THANKS!')
+    if (rr.client.channel.game.clientProvidedImage(rr.client, imageBase64)) {
+        setTimeout(function() { forwardNextRoundBatch(rr.client.channel) }, 3000)
+    }
 }
+
+
 
 
 
@@ -137,6 +150,7 @@ function Channel(name) {
     this.name = name
     this.clients = []
     this.playing = false
+    this.game = null
     this.deleted = false
 
     this.send = function(str, log = true) {
@@ -238,6 +252,15 @@ let startGameBroadcast = new Broadcast('gameStarted')
 
 
 
+
+
+
+
+
+
+
+
+
 function createChannel(name, hostClient) {
     channel = new Channel(name)
     channel.clients.push(hostClient)
@@ -263,6 +286,31 @@ function createChannel(name, hostClient) {
 
 
 
+function forwardNextRoundBatch(channel) {
+
+    let lastType = channel.game.whichType()
+
+    channel.game.advanceRound()
+
+    let msgID = lastType == 'caption' ? 'nextCaption' : 'nextImage'
+
+    for (let i = 0; i < channel.clients.length; ++i) {
+        channel.clients[i].send(msgID + '/' + channel.game.getNext(channel.clients[i]))
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -274,8 +322,6 @@ function createChannel(name, hostClient) {
 
 module.exports = {
 
-    parseAndHandle : function(client, message) {
-        parse(client, message)
-    }
+    parseAndHandle : parseAndHandle
 
 }
