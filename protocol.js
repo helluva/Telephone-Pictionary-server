@@ -31,16 +31,14 @@ function parseAndHandle(client, message) {
         handleRequestJoinChannel(new ResponseRequest(client, msgID), ...arg.split(','))
     } else if (func == 'requestBroadcast' || func == 'requestRebroadcast') {
         handleRequestBroadcast(new ResponseRequest(client, msgID), arg)
+    } else if (func == 'playerLeave') {
+        handlePlayerLeave(new ResponseRequest(client, msgID))
     } else if (func == 'startGame') {
         handleStartGame(new ResponseRequest(client, msgID))
     } else if (func == 'provideCaption') {
         handleProvideCaption(new ResponseRequest(client, msgID), arg)
     } else if (func == 'provideImage') {
         //setTimeout(function() { client.send('nextImage/' + arg) }, 1000)
-        handleProvideImage(new ResponseRequest(client, msgID), arg)
-    } else if (func == 'provideImageChunk') {
-        handleProvideImageChunk(new ResponseRequest(client, msgID), arg)
-    } else if (func == 'provideImageEnd') {
         handleProvideImage(new ResponseRequest(client, msgID), arg)
     }
 
@@ -57,27 +55,40 @@ function parseAndHandle(client, message) {
 
 
 function handleRequestHostNewGame(rr, name, hostUsername) {
+
+    if (rr.client.channel) {
+        rr.client.channel.remove(rr.client)
+    }
+
     rr.client.username = hostUsername
     createChannel(name, rr.client)
     rr.client.host = true
     rr.respond('ACCEPTED')
+
+    pruneChannels();
 }
 
 function handleRequestListOfChannels(rr) {
     str = ''
     let first = true
     for (let channelID in channels) {
-        if (!channels[channelID].playing) {
+        if (!channels[channelID].playing && !channels[channelID].deleted) {
             if (!first) {
                 str += ';'
             }
             str += channelID + ',' + channels[channelID].name
+            first = false
         }
     }
     rr.respond(str)
 }
 
 function handleRequestJoinChannel(rr, username, channelID, pass) {
+
+    if (rr.client.channel) {
+        rr.client.channel.remove(rr.client)
+    }
+
     rr.client.username = username
     if (channels[channelID].playing) {
         rr.respond('CANNOT_JOIN_MID_GAME')
@@ -94,6 +105,8 @@ function handleRequestJoinChannel(rr, username, channelID, pass) {
     channels[channelID].clients.push(rr.client)
     rr.client.channel = channels[channelID]
     rr.respond('JOINED')
+
+    pruneChannels();
 }
 
 function handleRequestBroadcast(rr, broadcast) {
@@ -102,6 +115,15 @@ function handleRequestBroadcast(rr, broadcast) {
             lobbyPlayerListBroadcast.sendTo(rr.client.channel)
         }
     }
+}
+
+function handlePlayerLeave(rr) {
+
+    if (rr.client.channel) {
+        rr.client.channel.remove(rr.client)
+    }
+
+    rr.respond('YOU DOG, YOU')
 }
 
 function handleStartGame(rr) {
@@ -117,15 +139,21 @@ function handleStartGame(rr) {
 
 function handleProvideCaption(rr, caption) {
     rr.respond('THANKS!')
-    if (rr.client.channel.game.clientProvidedCaption(rr.client, caption)) {
-        setTimeout(function() { forwardNextRoundBatch(rr.client.channel) }, 3000)
+    if (!rr.client.channel || !rr.client.channel.game) {
+        return // for debugging
+    }
+    if (rr.client.channel.game.clientProvidedCaption(rr.client, caption)) { // if last
+        setTimeout(function() { forwardNextRoundBatch(rr.client.channel) }, 500)
     }
 }
 
-function handleProvideImage(rr, imageBase64) {
+function handleProvideImage(rr, image) {
     rr.respond('THANKS!')
-    if (rr.client.channel.game.clientProvidedImage(rr.client, imageBase64)) {
-        setTimeout(function() { forwardNextRoundBatch(rr.client.channel) }, 3000)
+    if (!rr.client.channel || !rr.client.channel.game) {
+        return // for debugging
+    }
+    if (rr.client.channel.game.clientProvidedImage(rr.client, image)) { // if last
+        setTimeout(function() { forwardNextRoundBatch(rr.client.channel) }, 500)
     }
 }
 
@@ -135,6 +163,18 @@ function handleProvideImage(rr, imageBase64) {
 
 
 
+
+
+
+
+/***************/
+
+let chron = function() {
+    pruneChannels()
+    console.log(channels)
+}
+
+/***************/
 
 
 
@@ -163,6 +203,7 @@ function Channel(name) {
     }
 
     this.remove = function(client) {
+        this.clients.splice(this.clients.indexOf(client), 1)
         if (client.host) {
             this.close()
         }
@@ -244,7 +285,7 @@ let lobbyPlayerListBroadcast = new Broadcast('playersInLobby', function(channel)
 
 let startGameBroadcast = new Broadcast('gameStarted')
 
-
+let endGameBroadcast = new Broadcast('gameEnded')
 
 
 
@@ -268,7 +309,13 @@ function createChannel(name, hostClient) {
     channels[nextChannelID++] = channel
 }
 
-
+function pruneChannels() {
+    for (let channelID in channels) {
+        if (channels[channelID].clients.length < 1) {
+            delete channels[channelID]
+        }
+    }
+}
 
 
 
@@ -290,7 +337,10 @@ function forwardNextRoundBatch(channel) {
 
     let lastType = channel.game.whichType()
 
-    channel.game.advanceRound()
+    if (!channel.game.advanceRound()) {
+        endGame(channel)
+        return
+    }
 
     let msgID = lastType == 'caption' ? 'nextCaption' : 'nextImage'
 
@@ -300,6 +350,26 @@ function forwardNextRoundBatch(channel) {
 }
 
 
+function endGame(channel) {
+    endGameBroadcast.sendTo(channel)
+
+    let delay = function() {
+        type = 'caption'
+        for (let i = 0; i < channel.game.rounds.length; ++i) {
+            for (let j = 0; j < channel.game.order.length; ++j) {
+                channel.game.order[j].send('roundHistory' + '/' + i + ',' + channel.game.rounds[i][j][0] + ',' + type + ':' + channel.game.rounds[i][j][1])
+            }
+            type = type == 'caption' ? 'image' : 'caption'
+        }
+
+        channel.send('GLHF')
+
+        channel.close()
+    }
+
+    setTimeout(delay, 300)
+
+}
 
 
 
@@ -322,6 +392,7 @@ function forwardNextRoundBatch(channel) {
 
 module.exports = {
 
-    parseAndHandle : parseAndHandle
+    parseAndHandle : parseAndHandle,
+    chron : chron
 
 }

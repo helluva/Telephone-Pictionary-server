@@ -17,10 +17,11 @@ let server = net.createServer(function(socket) {
     let ghetto_buffer = ''
     socket.on('data', function(data) {
         let dataString = data.toString()
-        if (dataString.indexOf("\n") >= 0) {
+        if (dataString.indexOf("\n") > 0) {
             let dataStrings = dataString.split("\n")
             for (let i = 0; i < dataStrings.length - 1; ++i) {
                 let finalized = ghetto_buffer + dataStrings[i].trim()
+                ghetto_buffer = ''
                 console.log('Received data:', finalized)
                 protocol.parseAndHandle(client, finalized)
             }
